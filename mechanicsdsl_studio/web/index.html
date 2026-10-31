@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MechanicsDSL Studio</title>
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+<link rel="stylesheet" href="vendor/codemirror/codemirror.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-mark" viewBox="0 0 32 32">
+      <path d="M6 5h20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      <path d="M16 5l7.6 15.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="24.4" cy="22.2" r="4.4" fill="currentColor"/>
+      <path d="M16 5v17" stroke="currentColor" stroke-width="1.2" stroke-dasharray="1.6 2.4" opacity=".55"/>
+    </symbol>
+    <symbol id="i-play" viewBox="0 0 20 20"><path d="M6 4.2v11.6L15.6 10z" fill="currentColor"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 20 20"><path d="M5.5 4h3v12h-3zM11.5 4h3v12h-3z" fill="currentColor"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 20 20"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor"/></symbol>
+    <symbol id="i-new" viewBox="0 0 20 20"><path d="M5 2.5h6.5L15 6v11.5H5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M11.5 2.5V6H15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+    <symbol id="i-open" viewBox="0 0 20 20"><path d="M2.5 5.5v10h13l2-7h-13l-2 7M2.5 5.5h5l1.5 1.5h6v1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+    <symbol id="i-save" viewBox="0 0 20 20"><path d="M3.5 3.5h10l3 3v10h-13z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6.5 3.5v4h6v-4M6.5 16.5v-5h7v5" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.4" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 1.8v2.4M10 15.8v2.4M1.8 10h2.4M15.8 10h2.4M4.2 4.2l1.7 1.7M14.1 14.1l1.7 1.7M4.2 15.8l1.7-1.7M14.1 5.9l1.7-1.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 20 20"><path d="M15.5 12.6A6.5 6.5 0 0 1 7.4 4.5a6.5 6.5 0 1 0 8.1 8.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 20 20"><rect x="7" y="7" width="9.5" height="9.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M13 7V4.5A1 1 0 0 0 12 3.5H4.5a1 1 0 0 0-1 1V12a1 1 0 0 0 1 1H7" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-more" viewBox="0 0 20 20"><circle cx="5" cy="10" r="1.5" fill="currentColor"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/><circle cx="15" cy="10" r="1.5" fill="currentColor"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 20 20"><rect x="2.5" y="3.5" width="15" height="13" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.5 3.5v13" stroke="currentColor" stroke-width="1.5"/></symbol>
+  </defs>
+</svg>
+
+<div class="app" id="app">
+  <header class="topbar">
+    <button class="icon-btn" id="toggle-rail" title="Show or hide the side panel" aria-label="Side panel"><svg><use href="#i-panel"/></svg></button>
+    <div class="brand"><svg class="brand-mark"><use href="#i-mark"/></svg><span>MechanicsDSL Studio</span></div>
+    <input class="doc-title" id="doc-title" value="Untitled worksheet" aria-label="Worksheet title" spellcheck="false">
+    <span class="dirty-flag" id="dirty-flag" hidden>Edited</span>
+    <div class="topbar-actions">
+      <button class="icon-btn" id="btn-new" title="New worksheet (Ctrl+N)" aria-label="New worksheet"><svg><use href="#i-new"/></svg></button>
+      <button class="icon-btn" id="btn-open" title="Open worksheet (Ctrl+O)" aria-label="Open worksheet"><svg><use href="#i-open"/></svg></button>
+      <button class="icon-btn" id="btn-save" title="Save worksheet (Ctrl+S)" aria-label="Save worksheet"><svg><use href="#i-save"/></svg></button>
+      <span class="divider"></span>
+      <button class="icon-btn" id="btn-theme" title="Switch between light and dark" aria-label="Theme"><svg><use href="#i-moon"/></svg></button>
+      <button class="btn primary" id="btn-run-all" title="Run every system in order (Ctrl+Shift+Enter)">Run all</button>
+    </div>
+  </header>
+
+  <aside class="rail" id="rail">
+    <div class="rail-tabs" role="tablist">
+      <button role="tab" class="rail-tab active" data-rail="examples" aria-selected="true">Examples</button>
+      <button role="tab" class="rail-tab" data-rail="reference" aria-selected="false">Reference</button>
+    </div>
+    <div class="rail-body" id="rail-examples"></div>
+    <div class="rail-body" id="rail-reference" hidden></div>
+  </aside>
+
+  <main class="sheet-wrap" id="sheet-wrap">
+    <div class="sheet" id="sheet"></div>
+  </main>
+
+  <footer class="statusbar">
+    <span class="engine-state" id="engine-state"><i></i><span>Starting the engine</span></span>
+    <span id="status-msg"></span>
+    <span class="spacer"></span>
+    <span id="status-path"></span>
+    <span id="status-version"></span>
+  </footer>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="vendor/katex/katex.min.js"></script>
+<script src="vendor/codemirror/codemirror.js"></script>
+<script src="vendor/codemirror/simple.js"></script>
+<script src="vendor/codemirror/matchbrackets.js"></script>
+<script src="vendor/codemirror/closebrackets.js"></script>
+<script src="vendor/codemirror/active-line.js"></script>
+<script src="vendor/codemirror/clike.js"></script>
+<script src="vendor/codemirror/python.js"></script>
+<script src="vendor/codemirror/julia.js"></script>
+<script src="vendor/codemirror/rust.js"></script>
+<script src="vendor/codemirror/fortran.js"></script>
+<script src="vendor/codemirror/octave.js"></script>
+<script src="vendor/codemirror/javascript.js"></script>
+<script src="vendor/plotly.min.js"></script>
+<script src="stage.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

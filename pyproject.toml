@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mechanicsdsl-studio"
+version = "1.0.0"
+description = "A worksheet application for MechanicsDSL: write a Lagrangian, see the equations of motion, plots, animation and generated code"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Noah Parsons" }]
+dependencies = ["mechanicsdsl-core>=2.1.3", "pywebview>=5.0"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/MechanicsDSL/mechanicsdsl-desktop"
+
+[project.gui-scripts]
+mechanicsdsl-studio = "mechanicsdsl_studio.app:main"
+
+[tool.setuptools]
+packages = ["mechanicsdsl_studio"]
+
+[tool.setuptools.package-data]
+mechanicsdsl_studio = ["web/*", "web/vendor/*", "web/vendor/*/*", "web/vendor/*/*/*"]

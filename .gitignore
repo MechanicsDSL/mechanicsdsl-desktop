@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.buildenv/
+build/
+dist/
+*.spec
+*.mdsw
+selftest.txt
+_source.zip
