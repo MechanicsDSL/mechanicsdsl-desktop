@@ -322,10 +322,10 @@
     ta.addEventListener("keydown", (e) => { if (e.key === "Escape" || (e.key === "Enter" && e.shiftKey)) { e.preventDefault(); ta.blur(); } });
     c.prose.replaceWith(ta); c.textarea = ta; fit(); ta.focus();
   }
-  function markdown(src) {
-    const maths = [];
-    src = src.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => { maths.push(tex(m, true)); return "\u0000" + (maths.length - 1) + "\u0000"; });
-    src = src.replace(/\$([^$\n]+?)\$/g, (_, m) => { maths.push(tex(m, false)); return "\u0000" + (maths.length - 1) + "\u0000"; });
+  function markdown(src, texFn) {
+    const maths = [], render = texFn || tex;
+    src = src.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => { maths.push(render(m, true)); return "\u0000" + (maths.length - 1) + "\u0000"; });
+    src = src.replace(/\$([^$\n]+?)\$/g, (_, m) => { maths.push(render(m, false)); return "\u0000" + (maths.length - 1) + "\u0000"; });
     const inline = (s) => escapeHtml(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/\*([^*]+)\*/g, "<em>$1</em>");
     const out = [];
     let list = null;
@@ -678,6 +678,285 @@
     });
   }
 
+  /* ------------------------------------------------------------------ handout */
+  // A self-contained HTML page for a lesson: the notes, and for each system its
+  // model, equations, a strip of the motion and the plots. Mathematics is MathML
+  // and the figures are embedded images, so the file works offline, in any
+  // browser, and prints (or saves as PDF) on white paper whatever the app theme.
+  const PRINT = {
+    sheet: "#ffffff", ink: "#18202e", ink2: "#4f5a6c", ink3: "#7b8597", minor: "#e9eef5", major: "#d3dce8",
+    hatch: "#8a95a8", accent: "#1b4db1",
+    series: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"],
+  };
+  const HANDOUT_PARTS = [
+    ["notes", "Notes", true], ["source", "MechanicsDSL source", true], ["values", "Parameters and starting values", true],
+    ["equations", "Equations of motion", true], ["motion", "Motion (four stills)", true], ["coords", "Coordinates against time", true],
+    ["phase", "Phase portrait", true], ["energy", "Energy", false],
+  ];
+  const mathml = (s, display) => { try { return katex.renderToString(s, { displayMode: !!display, throwOnError: false, strict: "ignore", output: "mathml" }); } catch (e) { return escapeHtml(s); } };
+
+  function handoutDialog() {
+    const saved = store.get("mdsl-studio-handout", {});
+    const boxes = HANDOUT_PARTS.map(([id, label, on]) => {
+      const cb = h("input", { type: "checkbox", checked: saved[id] != null ? saved[id] : on });
+      return [id, cb, h("label", { class: "check" }, cb, label)];
+    });
+    const title = h("input", { class: "modal-input", value: state.title, "aria-label": "Handout title" });
+    const openAfter = h("input", { type: "checkbox", checked: saved.open !== false });
+    const go = h("button", { class: "btn primary" }, "Save handout…");
+    const cancel = h("button", { class: "btn" }, "Cancel");
+    const note = h("p", { class: "pane-note" }, "Saves one HTML file with everything embedded. Open it in a browser and print it, or choose Save as PDF in the print dialogue.");
+    const modal = h("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": "Handout" },
+      h("h2", {}, "Handout"), h("label", { class: "modal-label" }, "Title"), title,
+      h("div", { class: "modal-label" }, "Include"), h("div", { class: "modal-grid" }, ...boxes.map((b) => b[2])),
+      h("label", { class: "check", style: "margin-top:14px" }, openAfter, "Open it in the browser afterwards"), note,
+      h("div", { class: "modal-actions" }, cancel, go));
+    const backdrop = h("div", { class: "modal-backdrop" }, modal);
+    const close = () => { backdrop.remove(); document.removeEventListener("keydown", onKey); };
+    const onKey = (e) => { if (e.key === "Escape") close(); };
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop) close(); });
+    cancel.onclick = close;
+    go.onclick = async () => {
+      const parts = {};
+      for (const [id, cb] of boxes) parts[id] = cb.checked;
+      store.set("mdsl-studio-handout", Object.assign({}, parts, { open: openAfter.checked }));
+      go.disabled = cancel.disabled = true; go.textContent = "Preparing…";
+      try {
+        const html = await buildHandout(title.value.trim() || state.title, parts);
+        const r = await call("save_handout", html, title.value.trim() || state.title, openAfter.checked).catch(() => null);
+        close();
+        if (r) toast(r.error || "Saved " + r.path);
+        else if (!inWindow) downloadHtml(html, (title.value.trim() || "handout") + ".html");
+      } catch (e) {
+        go.disabled = cancel.disabled = false; go.textContent = "Save handout…";
+        note.textContent = "The handout could not be made: " + (e && e.message || e);
+      }
+    };
+    document.body.append(backdrop);
+    title.focus(); title.select();
+  }
+  function downloadHtml(html, name) {      // browser preview only: the desktop app saves through a dialogue
+    const a = h("a", { href: URL.createObjectURL(new Blob([html], { type: "text/html" })), download: name });
+    document.body.append(a); a.click(); a.remove();
+  }
+
+  async function buildHandout(title, parts) {
+    for (const c of state.cells) {           // every system needs an up-to-date result
+      if (c.type === "code" && (!c.result || c.state === "stale" || c.state === "new")) await runCell(c, { quiet: !!c.result });
+    }
+    const scratch = h("div", { style: "position:fixed;left:-20000px;top:0;width:900px", "aria-hidden": "true" });
+    document.body.append(scratch);
+    const body = [];
+    let fig = 0, headed = false;      // headed: the notes just before a system already name it
+    const figure = (img, caption) => `<figure>${img}<figcaption><span class="fig-no">Figure ${++fig}.</span> ${caption}</figcaption></figure>`;
+    try {
+      for (const c of state.cells) {
+        if (c.type === "text") {
+          let src = c.source.trim();
+          if (!body.length && src.split("\n")[0].replace(/^#\s*/, "").trim().toLowerCase() === title.toLowerCase()) src = src.split("\n").slice(1).join("\n").trim();
+          headed = parts.notes && /^#/m.test(c.source);
+          if (parts.notes && src) body.push(`<section class="notes">${markdown(src, mathml)}</section>`);
+          continue;
+        }
+        const r = c.result;
+        if (!r || !r.system) {
+          body.push(`<section class="system"><p class="note">A system in this worksheet could not be compiled${r && r.error ? ": " + escapeHtml(r.error) : ""}.</p></section>`);
+          continue;
+        }
+        const sys = r.system, name = sys.name.replace(/_/g, " ");
+        const out = [`<section class="system">` + (headed ? "" : `<h2 class="sys-title">${escapeHtml(name[0].toUpperCase() + name.slice(1))}</h2>`)];
+        headed = false;
+        if (parts.source) out.push(`<h3>Model</h3><pre class="source">${escapeHtml(c.source.trim())}</pre>`);
+        if (parts.values) out.push(valuesTable(c, r));
+        if (parts.equations && r.equations && r.equations.blocks) {
+          out.push("<h3>Equations of motion</h3>");
+          for (const b of r.equations.blocks) {
+            out.push(`<div class="eq-block"><div class="eq-title">${escapeHtml(b.title)}</div>` + b.lines.map((l) => `<div class="eq">${mathml(l, true)}</div>`).join("") +
+              (b.note ? `<p class="note">${escapeHtml(b.note)}</p>` : "") + "</div>");
+          }
+        }
+        if (r.ok) {
+          if (parts.motion && r.animation) out.push(figure(motionStrip(r, scratch), `${escapeHtml(captionFor(r.animation) || "The motion")}, at four moments.`));
+          if (parts.coords) out.push(figure(await chartImage(scratch, coordsFigure(r)), "Each coordinate against time."));
+          if (parts.phase) out.push(figure(await chartImage(scratch, phaseFigure(r)), "Phase portraits: each coordinate against its velocity. The ring marks the start."));
+          if (parts.energy && r.energy) out.push(figure(await chartImage(scratch, energyFigure(r)), r.energy.conserved
+            ? `Energy over time. It should be constant; the largest relative drift, ${r.energy.max_relative_drift.toExponential(1)}, is the solver's error.`
+            : "Energy over time. Forces in this system do work, so it changes."));
+        } else {
+          out.push(`<p class="note">The simulation did not complete: ${escapeHtml(r.error || "")}</p>`);
+        }
+        out.push("</section>");
+        body.push(out.join("\n"));
+      }
+    } finally {
+      scratch.remove();
+    }
+    const date = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+    return handoutPage(title, date, body.join("\n"));
+  }
+
+  function valuesTable(c, r) {
+    const sys = r.system;
+    const row = (p) => `<tr><td>${mathml(p.tex, false)}</td><td class="num">${escapeHtml(fmtNum(p.value))}</td><td>${escapeHtml(p.unit || "")}</td></tr>`;
+    const tables = [];
+    if (sys.parameters.length) tables.push(`<table><caption>Parameters</caption><tbody>${sys.parameters.map(row).join("")}</tbody></table>`);
+    if (sys.initial.length) tables.push(`<table><caption>Starting values</caption><tbody>${sys.initial.map(row).join("")}</tbody></table>`);
+    tables.push(`<table><caption>Simulation</caption><tbody><tr><td>Time span</td><td class="num">${escapeHtml(fmtNum(c.settings.t_end))}</td><td>s</td></tr>` +
+      (r.simulation ? `<tr><td>Solver</td><td class="num" colspan="2">${escapeHtml(r.simulation.method || "")}</td></tr>` : "") + "</tbody></table>");
+    return `<h3>Parameters and starting values</h3><div class="tables">${tables.join("")}</div>`;
+  }
+
+  function motionStrip(r, scratch) {
+    const a = r.animation, n = a.t.length, frames = [0, Math.round((n - 1) / 3), Math.round(2 * (n - 1) / 3), n - 1];
+    const cells = frames.map((f) => {
+      const cv = h("canvas", { style: "width:330px;height:240px;display:block" });
+      scratch.append(cv);
+      const st = new Stage(cv, a, { trails: !!a.trail, unit: "", palette: PRINT, dpr: 2.5, compact: true });
+      st.layout(); st.draw(f);
+      const url = cv.toDataURL("image/png");
+      cv.remove();
+      return `<div class="still"><img src="${url}" alt="The system at t = ${fmtNum(+a.t[f].toPrecision(4))}"><div class="t">t = ${escapeHtml(fmtNum(+a.t[f].toPrecision(4)))}</div></div>`;
+    });
+    return `<div class="strip">${cells.join("")}</div>`;
+  }
+
+  function printLayout(extra) {
+    const axis = { gridcolor: "#e7ebf1", zeroline: false, linecolor: "#c9d1dc", tickfont: { size: 11, color: "#4f5a6c" }, title: { font: { size: 12, color: "#4f5a6c" } }, automargin: true };
+    return [Object.assign({ paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff", font: { family: "Segoe UI, Helvetica, Arial, sans-serif", size: 11, color: "#4f5a6c" },
+      margin: { l: 64, r: 16, t: 12, b: 40 }, showlegend: false, width: 680 }, extra || {}), axis];
+  }
+  function coordsFigure(r) {
+    const s = r.simulation, n = s.coordinates.length;
+    const [layout, axis] = printLayout({ grid: { rows: n, columns: 1, pattern: "independent", roworder: "top to bottom", ygap: 0.35 }, height: Math.min(900, 60 + n * 130) });
+    const traces = [];
+    s.coordinates.forEach((q, i) => {
+      const k = i ? String(i + 1) : "", unit = (r.system.coordinates[i] || {}).unit;
+      traces.push({ x: s.t, y: s.series[q], xaxis: "x" + k, yaxis: "y" + k, type: "scatter", mode: "lines", line: { color: PRINT.series[i % 8], width: 1.6 } });
+      layout["xaxis" + k] = Object.assign({}, axis, i ? { matches: "x" } : {}, i === n - 1 ? { title: { text: "Time (s)", font: axis.title.font } } : { showticklabels: false });
+      layout["yaxis" + k] = Object.assign({}, axis, { title: { text: uname(q) + (unit ? ` (${unit})` : ""), font: axis.title.font } });
+    });
+    return { traces, layout };
+  }
+  function phaseFigure(r) {
+    const s = r.simulation, n = s.coordinates.length, cols = Math.min(n, n === 4 ? 2 : 3), rows = Math.ceil(n / cols);
+    const [layout, axis] = printLayout({ grid: { rows, columns: cols, pattern: "independent", xgap: 0.25, ygap: 0.35 }, height: rows * (cols === 1 ? 300 : 230) + 20, width: cols === 1 ? 440 : 680 });
+    const traces = [];
+    s.coordinates.forEach((q, i) => {
+      const k = i ? String(i + 1) : "", v = s.velocity_suffix === "p_" ? "p_" + q : q + "_dot";
+      traces.push({ x: s.series[q], y: s.series[v], xaxis: "x" + k, yaxis: "y" + k, type: "scatter", mode: "lines", line: { color: PRINT.series[i % 8], width: 1.3 } });
+      traces.push({ x: [s.series[q][0]], y: [s.series[v][0]], xaxis: "x" + k, yaxis: "y" + k, type: "scatter", mode: "markers", marker: { size: 8, color: "#ffffff", line: { color: PRINT.series[i % 8], width: 2 } } });
+      layout["xaxis" + k] = Object.assign({}, axis, { title: { text: uname(q), font: axis.title.font } });
+      layout["yaxis" + k] = Object.assign({}, axis, { title: { text: uname(v), font: axis.title.font } });
+    });
+    return { traces, layout };
+  }
+  function energyFigure(r) {
+    const s = r.simulation, e = r.energy;
+    const [layout, axis] = printLayout({ height: 260 });
+    layout.xaxis = Object.assign({}, axis, { title: { text: "Time (s)", font: axis.title.font } });
+    layout.yaxis = Object.assign({}, axis, { title: { text: "Energy", font: axis.title.font } });
+    return { traces: [{ x: s.t, y: e.values, type: "scatter", mode: "lines", line: { color: PRINT.series[0], width: 1.6 } }], layout };
+  }
+  async function chartImage(scratch, figSpec) {
+    const box = h("div", { style: `width:${figSpec.layout.width}px;height:${figSpec.layout.height}px` });
+    scratch.append(box);
+    try {
+      await Plotly.newPlot(box, figSpec.traces, figSpec.layout, { staticPlot: true });
+      const url = await Plotly.toImage(box, { format: "svg", width: figSpec.layout.width, height: figSpec.layout.height });
+      const pct = Math.round(100 * figSpec.layout.width / 680);
+      return `<img class="chart" src="${url}" alt=""${pct < 100 ? ` style="width:${pct}%"` : ""}>`;
+    } finally {
+      Plotly.purge(box); box.remove();
+    }
+  }
+
+  function handoutPage(title, date, body) {
+    const app = (state.info && state.info.app_version) ? `MechanicsDSL Studio ${state.info.app_version}` : "MechanicsDSL Studio";
+    return `<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="${escapeHtml(app)}">
+<title>${escapeHtml(title)}</title>
+<style>
+  :root { color-scheme: light; --ink: #18202e; --ink-2: #4f5a6c; --rule: #d8dee7; --accent: #1b4db1; }
+  html { background: #eef1f5; }
+  body { margin: 0; color: var(--ink); font: 15px/1.55 "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  .page { max-width: 760px; margin: 28px auto; padding: 44px 56px 56px; background: #fff; box-shadow: 0 1px 0 rgba(24,32,46,.05), 0 10px 30px -14px rgba(24,32,46,.25); }
+  header.doc { border-bottom: 2px solid var(--ink); padding-bottom: 10px; margin-bottom: 26px; display: flex; align-items: baseline; gap: 16px; }
+  header.doc h1 { font-size: 26px; line-height: 1.2; margin: 0; flex: 1; letter-spacing: -.01em; }
+  header.doc .date { color: var(--ink-2); font-size: 13px; white-space: nowrap; }
+  h1, h2, h3 { line-height: 1.25; }
+  .notes h1 { font-size: 21px; margin: 26px 0 8px; }
+  .notes h2, h2.sys-title { font-size: 18px; margin: 26px 0 8px; }
+  h3, .notes h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); margin: 22px 0 8px; }
+  p { margin: 0 0 10px; }
+  code, pre { font-family: Consolas, "SF Mono", Menlo, monospace; font-size: 12.5px; }
+  pre.source { background: #f5f7fa; border: 1px solid var(--rule); border-radius: 4px; padding: 10px 12px; white-space: pre-wrap; margin: 0; }
+  section.system { margin-top: 30px; }
+  .tables { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: flex-start; }
+  table { border-collapse: collapse; font-size: 13.5px; }
+  caption { text-align: left; font-weight: 600; font-size: 12px; color: var(--ink-2); padding-bottom: 3px; white-space: nowrap; }
+  td { border-top: 1px solid var(--rule); padding: 4px 14px 4px 0; vertical-align: baseline; }
+  tr:last-child td { border-bottom: 1px solid var(--rule); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .eq-block { margin: 6px 0 12px; }
+  .eq-title { font-size: 12.5px; color: var(--ink-2); margin-bottom: 2px; }
+  .eq { overflow: hidden; max-width: 170mm; }   /* the printable width of A4, so the fit below also holds on paper */
+  math { font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", math; font-size: 1.08em; }
+  math[display="block"] { margin: 6px 0; }
+  .note { color: var(--ink-2); font-size: 13px; }
+  figure { margin: 18px 0; break-inside: avoid; page-break-inside: avoid; }
+  figure img.chart { display: block; width: 100%; height: auto; }
+  figcaption { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
+  .fig-no { font-weight: 600; color: var(--ink); }
+  .strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .still { border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+  .still img { display: block; width: 100%; height: auto; }
+  .still .t { font-size: 12px; text-align: center; padding: 3px 0 4px; border-top: 1px solid var(--rule); font-variant-numeric: tabular-nums; }
+  footer.doc { margin-top: 36px; padding-top: 8px; border-top: 1px solid var(--rule); color: var(--ink-2); font-size: 12px; display: flex; justify-content: space-between; }
+  .print { position: fixed; right: 20px; top: 16px; font: 600 13px/1 inherit; padding: 9px 14px; border-radius: 5px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  @media screen and (max-width: 800px) { .page { margin: 0; padding: 24px 16px 32px; box-shadow: none; } .strip { grid-template-columns: repeat(2, 1fr); } .print { display: none; } }
+  @page { size: A4; margin: 16mm 16mm 18mm; }
+  @media print {
+    html { background: #fff; }
+    body { font-size: 11pt; }
+    .page { margin: 0; padding: 0; max-width: none; box-shadow: none; }
+    .print { display: none; }
+    h2, h3 { break-after: avoid; page-break-after: avoid; }
+    section.system { break-before: auto; }
+    pre.source, table, .eq-block { break-inside: avoid; page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<button class="print" onclick="window.print()">Print or save as PDF</button>
+<main class="page">
+<header class="doc"><h1>${escapeHtml(title)}</h1><span class="date">${escapeHtml(date)}</span></header>
+${body}
+<footer class="doc"><span>${escapeHtml(title)}</span><span>Made with ${escapeHtml(app)}</span></footer>
+</main>
+<script>
+  // Long equations: reduce the type size until each one fits the page width.
+  function fitEquations() {
+    document.querySelectorAll(".eq").forEach(function (el) {
+      var m = el.querySelector("math"); if (!m) return;
+      m.style.fontSize = "";
+      var size = 1.08;
+      while (el.scrollWidth > el.clientWidth + 1 && size > 0.62) { size -= 0.04; m.style.fontSize = size.toFixed(2) + "em"; }
+    });
+  }
+  window.addEventListener("load", fitEquations);
+  window.addEventListener("resize", fitEquations);
+  window.addEventListener("beforeprint", fitEquations);
+</script>
+</body>
+</html>
+`;
+  }
+
   /* ------------------------------------------------------------------ files */
   function loadDoc(data, path) {
     state.cells.forEach((c) => c.stage && c.stage.stop());
@@ -740,6 +1019,7 @@
   $("#btn-open").onclick = openWorksheet;
   $("#btn-save").onclick = () => saveWorksheet(false);
   $("#btn-run-all").onclick = runAll;
+  $("#btn-handout").onclick = handoutDialog;
   $("#doc-title").addEventListener("input", (e) => { state.title = e.target.value; setDirty(true); });
   $("#doc-title").addEventListener("change", () => call("set_title", state.title).catch(() => {}));
   $("#doc-title").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });

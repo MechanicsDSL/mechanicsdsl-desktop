@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 (November 2026)
+
+- **Handouts.** The Handout button saves the worksheet as one self-contained web page:
+  notes, each model's source, parameters and starting values, the equations of motion,
+  four stills of the motion, and plots of the coordinates, phase portraits and (if
+  chosen) energy. Mathematics is MathML and figures are embedded, so the file works
+  offline in any browser and prints, or saves as PDF, on white paper in either theme.
+  Long equations are scaled to fit the printed page.
+- **macOS.** Builds for Apple silicon and Intel Macs, as disk images.
+- **Release builds on GitHub Actions** for Windows and both kinds of Mac, each checked by
+  the bundled program's self-test before it is attached to the release. `build.py` holds
+  the build steps for every platform; the version number now comes only from
+  `mechanicsdsl_studio/__init__.py`.
+
 ## 1.0.0 (November 2026)
 
 First release.

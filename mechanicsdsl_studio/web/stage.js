@@ -27,6 +27,7 @@
     }
 
     colours() {
+      if (this.opts.palette) { this.c = this.opts.palette; return; }   // fixed colours, e.g. for a printed handout
       this.c = {
         sheet: css("--sheet"), ink: css("--ink"), ink2: css("--ink-2"), ink3: css("--ink-3"),
         minor: css("--grid-minor"), major: css("--grid-major"), hatch: css("--hatch"), accent: css("--accent"),
@@ -35,7 +36,7 @@
     }
 
     layout() {
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = this.opts.dpr || window.devicePixelRatio || 1;
       const r = this.canvas.getBoundingClientRect();
       this.w = Math.max(r.width, 10); this.h = Math.max(r.height, 10);
       this.canvas.width = Math.round(this.w * dpr); this.canvas.height = Math.round(this.h * dpr);

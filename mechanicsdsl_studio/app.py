@@ -142,6 +142,24 @@ class Api:
         except Exception as e:
             return {"error": f"Could not save the image: {e}"}
 
+    def save_handout(self, html, title, open_after=True):
+        result = self._dialog("save", save_filename=_safe(title or "Handout") + ".html",
+                              file_types=("Web page (*.html)",))
+        if not result:
+            return None
+        path = result[0] if isinstance(result, (list, tuple)) else result
+        if not path.lower().endswith((".html", ".htm")):
+            path += ".html"
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(html)
+        except Exception as e:
+            return {"error": f"Could not save the handout: {e}"}
+        if open_after:
+            from pathlib import Path
+            webbrowser.open(Path(path).resolve().as_uri())
+        return {"path": path}
+
     def open_link(self, url):
         if url.startswith(("https://", "http://")):
             webbrowser.open(url)
@@ -229,7 +247,10 @@ def main():
 
 
 def _storage_dir():
-    root = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/.local/share")
+    if sys.platform == "darwin":
+        root = os.path.expanduser("~/Library/Application Support")
+    else:
+        root = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/.local/share")
     path = os.path.join(root, "MechanicsDSL Studio")
     os.makedirs(path, exist_ok=True)
     return path

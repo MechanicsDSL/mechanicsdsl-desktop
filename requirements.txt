@@ -1,2 +1,2 @@
-mechanicsdsl-core>=2.1.3
+mechanicsdsl-core>=2.1.4
 pywebview>=5.0

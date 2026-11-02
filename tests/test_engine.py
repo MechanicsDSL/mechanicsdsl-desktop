@@ -166,3 +166,17 @@ def test_engine_process_runs_and_can_be_stopped():
         assert proc.call("run", EXAMPLES[0]["source"], {"t_end": 1})["ok"]   # restarted and usable
     finally:
         proc.close()
+
+
+def test_handout_is_saved_as_html(tmp_path, monkeypatch):
+    api = Api(engine=None)
+    target = tmp_path / "Lesson 3"
+    monkeypatch.setattr(api, "_dialog", lambda kind, **kw: [str(target)])
+    opened = []
+    monkeypatch.setattr("mechanicsdsl_studio.app.webbrowser.open", opened.append)
+    r = api.save_handout("<!doctype html><title>Lesson 3</title>", "Lesson 3", True)
+    assert r["path"].endswith("Lesson 3.html")
+    assert (tmp_path / "Lesson 3.html").read_text(encoding="utf-8").startswith("<!doctype html>")
+    assert opened and opened[0].startswith("file:")
+    monkeypatch.setattr(api, "_dialog", lambda kind, **kw: None)
+    assert api.save_handout("<p></p>", "x") is None          # dialogue cancelled
