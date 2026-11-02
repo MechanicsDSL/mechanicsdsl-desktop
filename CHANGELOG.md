@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1 (November 2026)
+
+- **Fixed: the Windows build from the release did not open** when its zip had been
+  extracted with File Explorer. Windows marks every extracted file as downloaded from the
+  internet, the .NET Framework will not load a marked library, and the window library
+  stopped with "Failed to resolve Python.Runtime.Loader.Initialize". The app now clears
+  the mark from the libraries it loads through .NET before opening the window.
+
 ## 1.1.0 (November 2026)
 
 - **Handouts.** The Handout button saves the worksheet as one self-contained web page:

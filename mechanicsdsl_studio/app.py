@@ -209,12 +209,41 @@ def selftest(report_path):
     return 1 if failures else 0
 
 
+def unblock_bundled_assemblies(root=None):
+    """Remove Windows' "downloaded from the internet" mark from the bundled .NET libraries.
+
+    Extracting the release zip with Explorer copies the mark (an NTFS stream called
+    Zone.Identifier) onto every file, and the .NET Framework refuses to load a marked
+    assembly. pythonnet then fails with "Failed to resolve Python.Runtime.Loader.Initialize"
+    and the window never opens. Only the assemblies pywebview loads through .NET are
+    touched. Returns the files that were unmarked.
+    """
+    if sys.platform != "win32":
+        return []
+    root = root or getattr(sys, "_MEIPASS", None)
+    if not root:
+        return []
+    done = []
+    for sub in ("pythonnet", "clr_loader", "webview"):
+        for folder, _dirs, files in os.walk(os.path.join(root, sub)):
+            for name in files:
+                if name.lower().endswith(".dll"):
+                    path = os.path.join(folder, name)
+                    try:
+                        os.remove(path + ":Zone.Identifier")
+                        done.append(path)
+                    except OSError:
+                        pass      # not marked, or the folder is read-only: nothing to do
+    return done
+
+
 def main():
     multiprocessing.freeze_support()
     if "--selftest" in sys.argv:
         i = sys.argv.index("--selftest")
         out = sys.argv[i + 1] if len(sys.argv) > i + 1 else "selftest.txt"
         sys.exit(selftest(out))
+    unblock_bundled_assemblies()
     import webview
     from .worker import EngineProcess
 

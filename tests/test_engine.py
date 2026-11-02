@@ -180,3 +180,23 @@ def test_handout_is_saved_as_html(tmp_path, monkeypatch):
     assert opened and opened[0].startswith("file:")
     monkeypatch.setattr(api, "_dialog", lambda kind, **kw: None)
     assert api.save_handout("<p></p>", "x") is None          # dialogue cancelled
+
+
+def test_unblock_is_a_no_op_off_windows(tmp_path, monkeypatch):
+    from mechanicsdsl_studio.app import unblock_bundled_assemblies
+    monkeypatch.setattr("mechanicsdsl_studio.app.sys.platform", "linux")
+    assert unblock_bundled_assemblies(str(tmp_path)) == []
+
+
+def test_unblock_removes_the_zone_mark_from_dlls(tmp_path, monkeypatch):
+    from mechanicsdsl_studio.app import unblock_bundled_assemblies
+    (tmp_path / "pythonnet" / "runtime").mkdir(parents=True)
+    (tmp_path / "pythonnet" / "runtime" / "Python.Runtime.dll").write_bytes(b"")
+    (tmp_path / "numpy").mkdir()
+    (tmp_path / "numpy" / "other.dll").write_bytes(b"")
+    removed = []
+    monkeypatch.setattr("mechanicsdsl_studio.app.sys.platform", "win32")
+    monkeypatch.setattr("mechanicsdsl_studio.app.os.remove", removed.append)
+    done = unblock_bundled_assemblies(str(tmp_path))
+    assert removed == [str(tmp_path / "pythonnet" / "runtime" / "Python.Runtime.dll") + ":Zone.Identifier"]
+    assert len(done) == 1
