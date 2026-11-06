@@ -556,7 +556,8 @@
     if (!e) { el.append(h("div", { class: "no-anim" }, "The energy function is not available for this system.")); return; }
     const drift = e.max_relative_drift;
     const note = e.conserved
-      ? h("span", {}, "Energy should be conserved for this system, so its drift measures the solver's accuracy. Largest relative drift: ", h("b", {}, drift.toExponential(1)), ".")
+      ? h("span", {}, "Energy should be conserved for this system, so its drift measures the solver's accuracy. Largest relative drift: ", h("b", {}, drift.toExponential(1)), "." +
+          ((r.simulation && r.simulation.integrator === "symplectic") ? " The symplectic integrator keeps this error bounded, so it does not grow with the length of the run." : ""))
       : h("span", {}, "Forces in this system do work, so the energy changes over time.");
     const box = chartBox(el, "", r.system.name + " energy");
     box.previousSibling.firstChild.replaceChildren(note);
@@ -656,9 +657,17 @@
     const choices = [...new Set([500, 1000, 2000, 4000, +c.settings.points])].sort((a, b) => a - b);
     const pts = h("select", { "aria-label": "Output points" }, ...choices.map((n) => h("option", { value: n, selected: n === +c.settings.points }, n.toLocaleString("en-GB"))));
     pts.addEventListener("change", () => { c.settings.points = +pts.value; setDirty(true); rerun(); });
-    panel.append(h("div", { class: "control-row" }, h("label", {}, "End time"), tEnd), h("div", { class: "control-row" }, h("label", {}, "Output points"), pts));
+    const methods = [["auto", "Automatic"], ["symplectic", "Symplectic"], ["adaptive", "Adaptive"]];
+    const current = c.settings.integrator || "auto";
+    const integ = h("select", { "aria-label": "Integrator", title: "Automatic uses the symplectic integrator, which keeps a conservative system's energy error bounded however long the run, and the adaptive solver otherwise." },
+      ...methods.map(([v, label]) => h("option", { value: v, selected: v === current }, label)));
+    integ.addEventListener("change", () => { c.settings.integrator = integ.value; setDirty(true); rerun(); });
+    panel.append(h("div", { class: "control-row" }, h("label", {}, "End time"), tEnd), h("div", { class: "control-row" }, h("label", {}, "Output points"), pts),
+      h("div", { class: "control-row" }, h("label", {}, "Integrator"), integ));
     const sim = r.simulation;
-    if (sim) panel.append(h("p", { class: "pane-note", style: "margin:10px 16px 0" }, `Solver ${sim.method || ""}, ${sim.evaluations.toLocaleString("en-GB")} evaluations` + (sim.stiff ? ", stiff" : "") + "."));
+    if (sim) panel.append(h("p", { class: "pane-note", style: "margin:10px 16px 0" }, `Solver ${sim.method || ""}` +
+      (sim.step ? `, fixed step ${sim.step.toPrecision(3)}, ${sim.steps.toLocaleString("en-GB")} steps` : "") +
+      `, ${sim.evaluations.toLocaleString("en-GB")} evaluations` + (sim.stiff ? ", stiff" : "") + "."));
     return panel;
   }
 
@@ -803,7 +812,8 @@
     if (sys.parameters.length) tables.push(`<table><caption>Parameters</caption><tbody>${sys.parameters.map(row).join("")}</tbody></table>`);
     if (sys.initial.length) tables.push(`<table><caption>Starting values</caption><tbody>${sys.initial.map(row).join("")}</tbody></table>`);
     tables.push(`<table><caption>Simulation</caption><tbody><tr><td>Time span</td><td class="num">${escapeHtml(fmtNum(c.settings.t_end))}</td><td>s</td></tr>` +
-      (r.simulation ? `<tr><td>Solver</td><td class="num" colspan="2">${escapeHtml(r.simulation.method || "")}</td></tr>` : "") + "</tbody></table>");
+      (r.simulation ? `<tr><td>Solver</td><td class="num" colspan="2">${escapeHtml(r.simulation.method || "")}</td></tr>` +
+        (r.simulation.step ? `<tr><td>Step</td><td class="num">${escapeHtml(fmtNum(r.simulation.step))}</td><td>s</td></tr>` : "") : "") + "</tbody></table>");
     return `<h3>Parameters and starting values</h3><div class="tables">${tables.join("")}</div>`;
   }
 

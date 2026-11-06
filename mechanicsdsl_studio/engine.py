@@ -21,8 +21,16 @@ os.environ.setdefault("MPLBACKEND", "Agg")   # MechanicsDSL imports matplotlib; 
 from . import __version__
 from .examples import BLANK, EXAMPLES
 from .geometry import infer_animation
+from . import integrators
 
 MAX_POINTS = 4000          # simulation output points sent to the interface
+ADAPTIVE = {"method": "LSODA", "rtol": 1e-10, "atol": 1e-12}
+"""The adaptive solver, for systems that are not conservative, or when it is chosen.
+
+MechanicsDSL's own default tolerance is a relative 1e-6. At 1e-10 the damped
+oscillator's error against its exact solution falls from 2e-8 to 2e-10 at the same
+speed; conservative systems are integrated symplectically instead (integrators.py)."""
+INTEGRATORS = ("auto", "symplectic", "adaptive")
 TARGETS = {                # code generator -> (label, file extension or None for a folder)
     "cpp": ("C++", ".cpp"),
     "python": ("Python", ".py"),
@@ -130,6 +138,7 @@ class Engine:
     def __init__(self):
         self._cache = {}            # source hash -> compiled PhysicsCompiler
         self._eq_cache = {}         # source hash -> typeset equations
+        self._flow_cache = {}       # source hash -> HamiltonianFlow, or the reason there is none
         self._lock = threading.RLock()
         self._mdsl = None
 
@@ -218,6 +227,18 @@ class Engine:
 
         t_end = float(settings.get("t_end", 10.0))
         points = int(min(max(int(settings.get("points", 1000)), 50), MAX_POINTS))
+        choice = settings.get("integrator", "auto")
+        if choice not in INTEGRATORS:
+            choice = "auto"
+        flow, not_symplectic = None, None
+        if choice != "adaptive":
+            flow = self._flow(key, comp, coords, list(params))
+            if isinstance(flow, str):
+                flow, not_symplectic = None, flow
+        if not_symplectic and choice == "symplectic":
+            out["warnings"] = out["warnings"] + [
+                f"The symplectic integrator cannot be used for this system, because "
+                f"{not_symplectic}; the adaptive solver was used instead."]
         t0 = time.perf_counter()
         try:
             with self._lock:
@@ -226,8 +247,19 @@ class Engine:
                         comp.parameters_def[k]["value"] = v
                     comp.initial_conditions.clear()
                     comp.initial_conditions.update(initial)
-                    comp.setup_simulation(comp.equations)
-                    sol = comp.simulate((0.0, t_end), points)
+                    sol = None
+                    if flow is not None:
+                        try:
+                            sol = integrators.integrate(
+                                flow, self._initial_state(comp, coords, initial),
+                                [params[k] for k in flow.param_names], t_end, points)
+                        except integrators.NotConservative as e:
+                            out["warnings"] = out["warnings"] + [
+                                f"The symplectic integrator could not be used for this "
+                                f"run, because {e}; the adaptive solver was used instead."]
+                    if sol is None:
+                        comp.setup_simulation(comp.equations)
+                        sol = comp.simulate((0.0, t_end), points, **ADAPTIVE)
                 finally:                                # keep the cached system pristine
                     for k, v in base_params.items():
                         comp.parameters_def[k]["value"] = v
@@ -253,6 +285,8 @@ class Engine:
             "velocity_suffix": "p_" if hamiltonian else "_dot",
             "method": sol.get("method_used"), "stiff": bool(sol.get("is_stiff")),
             "evaluations": int(sol.get("nfev") or 0), "t_end": t_end, "points": len(t),
+            "integrator": "symplectic" if sol.get("step") else "adaptive",
+            "step": sol.get("step"), "steps": sol.get("steps"),
         }
         try:
             out["energy"] = self._energy(comp, coords, params, y) if not hamiltonian else None
@@ -265,6 +299,30 @@ class Engine:
         out["timing"] = {"compile": round(compile_s, 3), "simulate": round(sim_s, 3),
                          "total": round(time.perf_counter() - t_start, 3)}
         return out
+
+    def _flow(self, key, comp, coords, param_names):
+        """The system's Hamiltonian flow for the symplectic integrator, built once per
+        source; or, if it cannot be integrated symplectically, the reason why."""
+        if key not in self._flow_cache:
+            try:
+                self._flow_cache[key] = integrators.HamiltonianFlow(
+                    comp, coords, param_names, _has_force(comp))
+            except integrators.NotConservative as e:
+                self._flow_cache[key] = str(e)
+            except Exception as e:                  # never let this stop a run
+                self._flow_cache[key] = f"its equations could not be prepared ({type(e).__name__})"
+            if len(self._flow_cache) > 24:
+                self._flow_cache.pop(next(iter(self._flow_cache)))
+        return self._flow_cache[key]
+
+    @staticmethod
+    def _initial_state(comp, coords, initial):
+        """The starting state in the solver's layout: q_1, rate_1, q_2, rate_2, ..."""
+        ham = bool(comp.use_hamiltonian_formulation)
+        y0 = []
+        for q in coords:
+            y0 += [initial.get(q, 0.0), initial.get(f"p_{q}" if ham else f"{q}_dot", 0.0)]
+        return y0
 
     def _describe(self, comp, coords, param_def, params, base_params, base_initial, initial):
         var = comp.variables or {}
@@ -347,7 +405,7 @@ class Engine:
             return None
         e0 = vals[0]
         scale = abs(e0) if abs(e0) > 1e-12 else max(1e-12, float(np.max(np.abs(vals))))
-        return {"values": _list(vals), "relative_drift": _list((vals - e0) / scale),
+        return {"values": _list_sig(vals, 15), "relative_drift": _list_sig((vals - e0) / scale),
                 "max_relative_drift": float(np.max(np.abs(vals - e0)) / scale),
                 "conserved": not _has_force(comp)}
 
@@ -445,3 +503,10 @@ def _list(a):
     a = np.asarray(a, dtype=float)
     return [None if not math.isfinite(v) else round(float(v), 10) if abs(v) < 1e15 else float(v)
             for v in a.tolist()]
+
+
+def _list_sig(a, digits=6):
+    """Like _list, but rounded to significant figures rather than decimal places, so
+    that a series of small values, such as an energy drift of 1e-10, keeps its shape."""
+    a = np.asarray(a, dtype=float)
+    return [None if not math.isfinite(v) else float(f"{v:.{digits}g}") for v in a.tolist()]

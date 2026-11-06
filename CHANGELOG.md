@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.2.0 (November 2026)
+
+- **Energy is now conserved over long runs.** Conservative systems are integrated with a
+  symplectic method, the two-stage Gauss-Legendre method (order 4), whose energy error
+  stays bounded however long the run instead of accumulating. Over 5,000 years the
+  planetary orbit's relative energy drift falls from 1.3%, and rising, to 4e-10, the
+  same as over 500 years; its angular momentum is conserved to rounding error. Every
+  conservative example in the gallery now holds its energy to 1e-9 or better, and most
+  re-solve as quickly as before or faster. The method works for any system whose
+  Lagrangian is quadratic in the velocities, including orbits in polar coordinates and
+  pendulums whose mass matrix changes with the configuration, and for Hamiltonian
+  worksheets. Its fixed step is chosen from a short trial over the fastest part of the
+  motion, and the whole run is then checked against the energy target.
+- **Tighter tolerance for the adaptive solver,** used for systems with damping or other
+  non-conservative forces: a relative tolerance of 1e-10, against 1e-6 before. The
+  damped oscillator's error against its exact solution falls from 2e-8 to 2e-10.
+- **Integrator setting.** Each system's Time span panel has an Integrator choice:
+  Automatic (the default: symplectic for conservative systems, adaptive otherwise),
+  Symplectic or Adaptive. The solver note gives the step used, and the energy pane says
+  when the error is bounded. If the symplectic integrator cannot be used for a system,
+  the worksheet says why and uses the adaptive solver.
+- **Fixed: small energy drifts were plotted as steps.** The energy and its drift were
+  rounded to ten decimal places before plotting, which turned drifts near 1e-10 into
+  staircases; they are now rounded to significant figures instead.
+
 ## 1.1.1 (November 2026)
 
 - **Fixed: the Windows build from the release did not open** when its zip had been
